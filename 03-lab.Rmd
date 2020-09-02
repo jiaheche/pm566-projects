@@ -126,7 +126,6 @@ cor(elev$temp, elev$day, use = "complete")
 
 ### 7. Exploratory graphs
 
-
 We should look at the distributions of all of the key variables to make sure there are no remaining issues with the data.
 
 ```{r}
@@ -136,7 +135,6 @@ hist(met$wind.sp)
 ```
 
 One thing we should consider for later analyses is to log transform wind speed and elevation as the are very skewed.
-
 
 Look at where the weather station with highest elevation is located.
 
