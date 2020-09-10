@@ -1,0 +1,112 @@
+---
+title: "Assignment 01 - Exploratory Data Analysis"
+link-citations: yes
+---
+
+```{r setup, message=FALSE}
+library(data.table)
+library(leaflet)
+library(tidyverse)
+library(lubridate)
+```
+
+
+
+1.
+
+- Download process was done without R and thus is not shown here.
+
+```{r}
+epa2004 <- data.table(read.csv("epa2004.csv"))
+epa2019 <- data.table(read.csv("epa2019.csv"))
+
+head(epa2004)
+head(epa2019)
+
+tail(epa2004)
+tail(epa2019)
+
+str(epa2004)
+str(epa2019)
+
+summary(epa2004)
+summary(epa2019)
+
+summary(epa2004$SITE_LATITUDE)
+summary(epa2019$SITE_LATITUDE)
+summary(epa2004$SITE_LONGITUDE)
+summary(epa2019$SITE_LONGITUDE)
+summary(epa2004$DAILY_AQI_VALUE)
+summary(epa2019$DAILY_AQI_VALUE)
+summary(epa2004$Daily.Mean.PM2.5.Concentration)
+summary(epa2019$Daily.Mean.PM2.5.Concentration)
+```
+
+- According to the dimensions of two data sets, we have more air quality data in 2019 than in 2004; no obvious problem is observed for headers, footers, variable names and types of two data sets. The ranges of latitude, longitude and AQI also seems reasonable. Some negative reads are observed for PM2.5 concentration, which does not make sense and needs to be adjusted later.
+
+
+
+2.
+
+```{r}
+epa <- rbind(epa2004, epa2019)
+
+epa$year <- year(mdy(epa$Date))
+
+epa <- rename(epa, pm25 = Daily.Mean.PM2.5.Concentration, lat = SITE_LATITUDE, lon = SITE_LONGITUDE)
+```
+
+
+
+3.
+
+```{r}
+leaflet() %>%
+  addProviderTiles('OpenStreetMap') %>%
+  addCircles(data = filter(epa, year == 2019), lat = ~lat, lng = ~lon, opacity = 1, fillOpacity = 1, radius = 50, color = "blue") %>%
+  addCircles(data = filter(epa, year == 2004), lat = ~lat, lng = ~lon, opacity = 1, fillOpacity = 1, radius = 50, color = "red")
+```
+
+- Many monitoring sites have been added during this 15 years, but no obvious trend is observed for spatial distribution of the monitoring sites.
+
+
+
+4.
+
+- It is assumed here that the negative reads of PM2.5 concentration are implausible.
+
+```{r}
+dim(filter(epa, is.na(pm25)))[1]/dim(epa)[1]
+dim(filter(epa, pm25 < 0))[1]/dim(epa)[1]
+
+epa <- filter(epa, pm25 > 0)
+
+summary(epa$pm25)
+```
+
+- No missing value are observed in PM2.5 concentration variable. Only about 0.4% of the values are implausible and are removed from the data set. Statistic summary shows that the distribution of this variable is highly skewed.
+
+
+
+5.
+
+```{r}
+hist(epa[year == 2004]$pm25, breaks=40)
+hist(epa[year == 2019]$pm25, breaks=40)
+summary(epa[year == 2004]$pm25)
+summary(epa[year == 2019]$pm25)
+
+epa_county <- epa[,.(pm25 = mean(pm25), lat = mean(lat), lon = mean(lon), year = mean(year)), by = c("COUNTY", "Date")]
+
+hist(epa_county[year == 2004]$pm25, breaks=40)
+hist(epa_county[year == 2019]$pm25, breaks=40)
+summary(epa_county[year == 2004]$pm25)
+summary(epa_county[year == 2019]$pm25)
+
+hist(epa[year == 2004 & COUNTY == "Los Angeles"]$pm25, breaks=40)
+hist(epa[year == 2019 & COUNTY == "Los Angeles"]$pm25, breaks=40)
+summary(epa[year == 2004 & COUNTY == "Los Angeles"]$pm25)
+summary(epa[year == 2019 & COUNTY == "Los Angeles"]$pm25)
+```
+
+- From the histograms and statistical summaries and assuming the scale and definition of PM2.5 remain consistent, we can tell that the average daily concentrations of PM2.5 have decreased in both state level and county level; although somewhat less observable due to the higher maximum reads, the average daily concentrations of PM2.5 for monitoring sites in Los Angeles also decreased.
