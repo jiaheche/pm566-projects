@@ -1,0 +1,175 @@
+---
+title: "Assignment 01 - Data Viz and Wrangling"
+output: html_document
+---
+
+```{r setup, message=FALSE}
+library(data.table)
+library(leaflet)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+```
+
+
+
+1.
+
+- Download process was done without R and thus is not shown here.
+
+```{r}
+indiv <- data.table(read.csv("chs_individual.csv"))
+region <- data.table(read.csv("chs_regional.csv"))
+
+merged <- merge(x = indiv, y = region, by = "townname",  all.x = TRUE, all.y = FALSE)
+
+nrow(indiv)
+nrow(merged)
+
+merged[, bmi_avg := mean(bmi, na.rm = TRUE), by = .(male, hispanic)]
+merged[, fev_avg := mean(fev, na.rm = TRUE), by = .(male, hispanic)]
+
+merged[, bmi := ifelse(is.na(bmi), bmi_avg, bmi)]
+merged[, fev := ifelse(is.na(fev), fev_avg, fev)]
+```
+
+- Missing values in asthma cannot be dealt with using the provided method because asthma is a binary variable.
+
+
+
+2.
+
+```{r, message=FALSE}
+merged[bmi <= 14, obesity_level := "underweight"]
+merged[bmi <= 22 & bmi > 14, obesity_level := "normal"]
+merged[bmi <= 24 & bmi > 22, obesity_level := "overweight"]
+merged[bmi > 24, obesity_level := "obese"]
+
+merged %>%
+  group_by(obesity_level) %>%
+    summarise(min = min(bmi), max = max(bmi), n())
+```
+
+
+
+3.
+
+```{r}
+merged[smoke == 1 & gasstove ==1, smoke_gas_exposure := "both"]
+merged[smoke == 1 & gasstove ==0, smoke_gas_exposure := "smoke"]
+merged[smoke == 0 & gasstove ==1, smoke_gas_exposure := "gas"]
+merged[smoke == 0 & gasstove ==0, smoke_gas_exposure := "neither"]
+```
+
+
+
+4.
+
+```{r, message=FALSE}
+merged %>%
+  group_by(townname) %>%
+    summarise(avg_fev = mean(fev), sd_fev = sd(fev), prop_as = mean(asthma, na.rm = TRUE), sd_as = sd(asthma, na.rm = TRUE))
+
+merged %>%
+  group_by(male) %>%
+    summarise(avg_fev = mean(fev), sd_fev = sd(fev), prop_as = mean(asthma, na.rm = TRUE), sd_as = sd(asthma, na.rm = TRUE))
+
+merged %>%
+  group_by(obesity_level) %>%
+    summarise(avg_fev = mean(fev), sd_fev = sd(fev), prop_as = mean(asthma, na.rm = TRUE), sd_as = sd(asthma, na.rm = TRUE))
+
+merged %>%
+  filter(!(smoke_gas_exposure %in% NA)) %>%
+    group_by(smoke_gas_exposure) %>%
+      summarise(avg_fev = mean(fev), sd_fev = sd(fev), prop_as = mean(asthma, na.rm = TRUE), sd_as = sd(asthma, na.rm = TRUE))
+```
+
+
+
+
+Looking at the data (EDA)
+
+```{r}
+merged %>%
+  ggplot(mapping = aes(x=bmi, y=fev, color=townname))+
+  geom_point()+
+  stat_smooth(method=lm)+
+  facet_wrap(~townname)+
+  labs(title = "BMI v. FEV by town with regression lines")
+```
+
+- BMI and FEV have positive correlation across all towns.
+
+```{r}
+merged %>%
+  ggplot()+
+  geom_histogram(mapping = aes(x=fev, fill=obesity_level))+
+  scale_fill_brewer(palette = "Set3")+
+  labs(title = "FEV by BMI category", x="FEV", y="n")
+
+merged %>%
+  filter(!(smoke_gas_exposure %in% NA)) %>%
+    ggplot()+
+    geom_histogram(mapping = aes(x=fev, fill=smoke_gas_exposure))+
+    scale_fill_brewer(palette = "Set3")+
+    labs(title = "FEV by smoke/gas exposure", x="FEV", y="n")
+
+```
+
+- Within each category of obesity level or smoke/gas exposure, the distribution of FEV is nearly normal. Most people have normal BMI and exposure to gas.
+
+```{r}
+merged %>%
+  filter(!(smoke_gas_exposure %in% NA)) %>%
+  ggplot()+
+  geom_bar(mapping = aes(x=obesity_level, fill=smoke_gas_exposure))+
+  scale_fill_brewer(palette = "Set3")+
+  labs(title = "BMI by smoke/gas exposure", x="BMI", y="n")
+```
+
+- Again, lots of people have normal BMI and exposure to gas.
+
+```{r}
+merged %>%
+  ggplot() +
+  geom_boxplot(mapping = aes(y=fev, fill=obesity_level))+
+  labs(title = "FEV by BMI category", y="FEV")
+
+merged %>%
+    filter(!(smoke_gas_exposure %in% NA)) %>%
+      ggplot() +
+      geom_boxplot(mapping = aes(y=fev, fill=smoke_gas_exposure))+
+      labs(title = "FEV by smoke/gas exposure", y="FEV")
+```
+
+- FEV again shows positive correlation with BMI but no clear correlation with gas/smoke exposure.
+
+```{r}
+leaflet(merged) %>%
+  addProviderTiles('OpenStreetMap') %>%
+  addCircles(lat = ~lat, lng = ~lon, color = "brown",opacity = 1,
+             fillOpacity = 1, radius = ~(pm25_mass*200))
+```
+
+- PM2.5 mass is higher in greater LA area than in other Southern California communities.
+
+```{r}
+merged %>%
+  ggplot(mapping = aes(x=pm25_mass, y=fev))+
+  geom_point()+
+  stat_smooth(method=lm)+
+  labs(title = "PM2.5 mass v. FEV by town with regression lines")
+```
+
+- Since pm2.5 is only reported per town, it's hard to tell directly from this graph whether PM2.5 mass is associated with FEV.
+
+```{r}
+merged[, fev_avg_town := mean(fev, na.rm = TRUE), by = .(townname)]
+merged %>%
+  ggplot(mapping = aes(x=pm25_mass, y=fev_avg_town))+
+  geom_point()+
+  stat_smooth(method=lm)+
+  labs(title = "PM2.5 mass v. FEV by town with regression lines")
+```
+
+- If we use the town average FEV to draw the graph instead, the PM2.5 mass shows negative association with FEV.
