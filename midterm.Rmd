@@ -1,0 +1,71 @@
+---
+title: "Midterm Project"
+output: html_document
+always_allow_html: true
+---
+
+```{r setup, message=FALSE}
+knitr::opts_chunk$set(include  = TRUE)
+library(knitr)
+library(tidyverse)
+library(data.table)
+```
+
+## Introduction
+
+The data I am using for the project is the COVID-19 daily cumulative case data in the United States, by county and since Jan 22, 2020. It is released and being updated daily by Johns Hopkins University Center for Systems Science and Engineering. The question I am trying to answer is whether the COVID-19 pandemic is ending (i.e., are the numbers of new cases decreasing) specifically in California and in the entire United States.
+
+## Method
+
+The original dataset can be found in JHU CSSE official github repository for COVID-19 data: https://github.com/CSSEGISandData/COVID-19. 
+
+First, the unneeded variables (for example, "Country" is useless in this project because all the interested data is for the United States) is dropped from the dataset. The original dataset also includes cases in places outside the United States (e.g., the diamond princess cruise ship); as the populations on cruise ships are poorly defined and are relatively small, they are dropped from the dataset. The data for American territories are kept. Missing values are checked and no missing value is observed for daily reported case.
+
+The dataset is then reshaped from long to wide for easier interpretation, and variables are renamed accordingly. The county level numbers within each state are added up to get the state level case data, and state level numbers are added up to get the national data. The cumulative case of the previous date is subtracted from that of the current date to calculate the daily new case. Because of that, the data of very first recorded date (Jan 22th) is invalid and dropped. The log transformation is used for better visualization in figures. Finally, the dataset is sorted according to state name and date.
+
+## Results
+
+```{r message=FALSE, include=FALSE}
+download.file("https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv",
+              "time_series_covid19_confirmed_US.csv", method="libcurl", timeout = 60)
+raw_data <- as.data.table(read_csv("time_series_covid19_confirmed_US.csv"))
+
+raw_data [, c("UID", "iso2", "iso3", "code3", "FIPS", "Lat", "Long_", "Country_Region") := NULL]
+raw_data <- filter(raw_data, Province_State != "Diamond Princess" & Province_State != "Grand Princess")
+
+which(is.na(raw_data))
+
+county_case = melt(raw_data,
+                   id.vars = c("Admin2", "Province_State", "Combined_Key"),
+                   measure.vars = 4:ncol(raw_data))
+setnames(county_case,
+         c("Admin2", "Province_State", "Combined_Key", "variable", "value"),
+         c("county", "state", "combined_county_name", "date", "case"))
+
+state_case <- as.data.table(rbind(county_case %>% group_by(state, date) %>% summarise(case = sum(case)),
+                    county_case %>% group_by(date) %>% summarise(case = sum(case), state = "US Total")))
+
+state_case [, new := case - lag(case)]
+state_case [, log_new := log(new)]
+state_case <- filter(state_case, date != "1/22/20")
+state_case [, date := as.Date(date, "%m/%d/%y")]
+setorder(state_case, state, date)
+```
+
+```{r, message=FALSE}
+kable((state_case %>% filter(state == "California" | state == "US Total") %>% group_by(state) %>% 
+        summarise(avg_new = mean(new), sd_new = sd(new), max_new = max(new), today_new = last(new))),
+       digits = 2, format = "html", align = "c",
+      col.names = c("State", "Average Daily New Cases", "StDev of Daily New Cases",
+                    "Largest Daily New Cases", "Today's New Cases"),
+       caption = "Summary of COVID-19 Daily New Cases Since Jan 23th")
+      
+state_case %>% filter(state == "California" | state == "US Total") %>%
+  ggplot(mapping = aes(x=date, y=log_new, color=state))+
+  geom_line()+
+  labs(title = "Time series of Log of COVID-19 Daily New Cases Since Jan 23th", x = "Date", y = "Log of Daily New Cases")
+```
+
+## Conclusion
+
+Based on the table and figure, we conclude that the pandemic is still far from ending both in California and in the entire United States. Although the recent daily new cases have dropped significantly from the July and August peak, today's new cases are still quite high - 3806 in California and 57420 in the entire United States. The time series figure also suggests that the daily new cases do not have a clear declining trend yet.
