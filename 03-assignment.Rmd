@@ -1,0 +1,209 @@
+---
+title: "Assignment 03 - Web Scraping and Text Mining"
+output: github_document
+---
+
+```{r setup, message=FALSE}
+library(httr)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(tidytext)
+library(dplyr)
+```
+
+
+## APIs
+
+```{r}
+# Downloading the website 
+website <- xml2::read_html("https://pubmed.ncbi.nlm.nih.gov/?term=sars-cov-2+trial+vaccine")
+
+# Finding the counts
+counts <- xml2::xml_find_first(
+  website, "/html/body/main/div[9]/div[2]/div[2]/div[1]/span")
+
+# Turning it into text
+counts <- as.character(counts)
+
+# Extracting the data using regex
+stringr::str_extract(counts, "[0-9,]+")
+```
+
+- I am able to find 564 papers.
+
+```{r}
+# Download details using query
+query_ids <- GET(
+  url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+  query = list(
+    db = "pubmed", term = "sars-cov-2 trial vaccine", retmax = 250))
+
+# Extracting the content of the response of GET
+ids <- httr::content(query_ids)
+
+# Turn the result into a character vector
+ids <- as.character(ids)
+
+# Find all the ids 
+ids <- stringr::str_extract_all(ids, "<Id>[0-9]+</Id>") [[1]]
+
+# Remove all the leading and trailing <Id> </Id>
+ids <- stringr::str_remove_all(ids, "</?Id>")
+
+# Get abstracts using ids
+publications <- GET(
+  url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+  query = list(
+    db = "pubmed", id = paste(ids, collapse = ","), retmax = 250, rettype = "abstract"))
+```
+
+```{r}
+publications <- httr::content(publications)
+pub_char_list <- xml2::xml_children(publications)
+pub_char_list <- sapply(pub_char_list, as.character)
+
+titles <- str_extract(pub_char_list,
+                      "<ArticleTitle>(\\n|.)+</ArticleTitle>")
+titles <- str_remove_all(titles, "</?[[:alnum:]]+>")
+titles <- str_replace_all(titles, "\\s+", " ")
+
+journals <- str_extract(pub_char_list,
+                       "<Title>(\\n|.)+</Title>")
+journals <- str_remove_all(journals, "</?[[:alnum:]]+>")
+journals <- str_replace_all(journals, "\\s+", " ")
+
+dates <- str_extract_all(pub_char_list,
+                             "<PubDate>(\\n|.)+</PubDate>")
+dates <- str_remove_all(dates, "</?[[:alnum:]]+>")
+dates <- str_replace_all(dates, "\\s+", " ")
+
+abstracts <- str_extract(pub_char_list,
+                         "<Abstract>(\\n|.)+</Abstract>")
+abstracts <- str_remove_all(abstracts, "</?[[:alnum:]]+>")
+abstracts <- str_replace_all(abstracts, "\\s+", " ")
+
+database <- data.frame(
+  PubMedID = ids, Title = titles, Journal = journals, Date = dates, Abstracts = abstracts)
+
+knitr::kable(database)
+```
+
+
+## Text Mining
+
+```{r, message=FALSE}
+download.file(
+  "https://raw.githubusercontent.com/USCbiostats/data-science-data/master/03_pubmed/pubmed.csv",
+  "pubmed.csv", method="libcurl", timeout = 60)
+
+pubmed <- fread("pubmed.csv")
+```
+
+```{r}
+pubmed %>%
+  unnest_tokens(token, abstract) %>%
+    count(token, sort = TRUE) %>%
+      top_n(20)
+
+pubmed %>%
+  unnest_tokens(token, abstract) %>%
+    anti_join(stop_words, by = c("token" = "word")) %>%
+      filter(!(token %in% as.character(seq(0,100)))) %>%
+        count(token, sort = TRUE) %>%
+          top_n(20)
+
+pubmed %>%
+  filter(term == "covid") %>%
+    unnest_tokens(token, abstract) %>%
+      anti_join(stop_words, by = c("token" = "word")) %>%
+        filter(!(token %in% as.character(seq(0,100)))) %>%
+          count(token, sort = TRUE) %>%
+            top_n(5)
+
+pubmed %>%
+  filter(term == "meningitis") %>%
+    unnest_tokens(token, abstract) %>%
+      anti_join(stop_words, by = c("token" = "word")) %>%
+        filter(!(token %in% as.character(seq(0,100)))) %>%
+          count(token, sort = TRUE) %>%
+            top_n(5)
+
+pubmed %>%
+  filter(term == "prostate cancer") %>%
+    unnest_tokens(token, abstract) %>%
+      anti_join(stop_words, by = c("token" = "word")) %>%
+        filter(!(token %in% as.character(seq(0,100)))) %>%
+          count(token, sort = TRUE) %>%
+            top_n(5)
+
+pubmed %>%
+  filter(term == "cystic fibrosis") %>%
+    unnest_tokens(token, abstract) %>%
+      anti_join(stop_words, by = c("token" = "word")) %>%
+        filter(!(token %in% as.character(seq(0,100)))) %>%
+          count(token, sort = TRUE) %>%
+            top_n(5)
+
+pubmed %>%
+  filter(term == "preeclampsia") %>%
+    unnest_tokens(token, abstract) %>%
+      anti_join(stop_words, by = c("token" = "word")) %>%
+        filter(!(token %in% as.character(seq(0,100)))) %>%
+          count(token, sort = TRUE) %>%
+            top_n(5)
+```
+
+- Removing stop words significantly change the tokens appear as the most frequent; only "covid" stays in top 10 after removing stop words. 
+
+- After removing stop words, the 5 most common tokens for the search term:
+    1) "covid" are "covid", "patients", "disease", "pandemic", "coronavirus" and "health" (6 because of ties);
+    2) "meningitis" are "patients", "meningitis", "meningeal", "csf" and "clinical";
+    3) "prostate cancer" are "cancer", "prostate", "patients", "treatment" and "disease";
+    4) "cystic fibrosis" are "fibrosis", "cystic", "cf", "patients" and "disease";
+    5) "preeclampsia" are "pre", "eclampsia", "preeclampsia", "women" and "pregnancy".
+    
+```{r}
+pubmed %>%
+  unnest_ngrams(ngram, abstract, n = 2) %>%
+    count(ngram, sort = TRUE) %>%
+      top_n(20) %>%
+        ggplot(aes(x = n, y = fct_reorder(ngram, n))) + geom_col()
+```
+
+```{r}
+tfidf <- pubmed %>%
+  unnest_tokens(token, abstract) %>%
+    count(token, term) %>%
+      bind_tf_idf(token, term, n) %>%
+        arrange(desc(tf_idf))
+
+tfidf %>% 
+  filter(term == "covid") %>%
+    top_n(5)
+
+tfidf %>% 
+  filter(term == "meningitis") %>%
+    top_n(5)
+
+tfidf %>% 
+  filter(term == "prostate cancer") %>%
+    top_n(5)
+
+tfidf %>% 
+  filter(term == "cystic fibrosis") %>%
+    top_n(5)
+
+tfidf %>% 
+  filter(term == "preeclampsia") %>%
+    top_n(5)
+```
+
+- The 5 tokens with the highest TF-IDF value for the search term:
+    1) "covid" are "covid", "pandemic", "coronavirus", "sars" and "cov";
+    2) "meningitis" are "meningitis", "meningeal	", "pachymeningitis", "csf" and "meninges";
+    3) "prostate cancer" are "prostate", "androgen", "psa", "prostatectomy" and "castration";
+    4) "cystic fibrosis" are "cf", "fibrosis", "cystic", "cftr" and "sweat";
+    5) "preeclampsia" are "eclampsia", "preeclampsia", "pregnancy", "maternal" and "gestational".
+    
+- The results are somewhat similar with the results in Q1, while become more in detail about the diseases.
